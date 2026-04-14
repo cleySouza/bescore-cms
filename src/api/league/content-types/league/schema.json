@@ -1,0 +1,26 @@
+{
+  "kind": "collectionType",
+  "collectionName": "leagues",
+  "info": {
+    "singularName": "league",
+    "pluralName": "leagues",
+    "displayName": "league"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "name": {
+      "type": "string"
+    },
+    "is_national_team": {
+      "type": "boolean"
+    },
+    "continent": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "api::continent.continent"
+    }
+  }
+}
