@@ -481,7 +481,7 @@ export interface ApiClubClub extends Struct.CollectionTypeSchema {
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
-    league: Schema.Attribute.Relation<'oneToOne', 'api::league.league'>;
+    league: Schema.Attribute.Relation<'manyToOne', 'api::league.league'>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<'oneToMany', 'api::club.club'> &
       Schema.Attribute.Private;
@@ -515,6 +515,7 @@ export interface ApiContinentContinent extends Struct.CollectionTypeSchema {
       'api::continent.continent'
     > &
       Schema.Attribute.Private;
+    logo: Schema.Attribute.Media<'images'>;
     name: Schema.Attribute.String;
     publishedAt: Schema.Attribute.DateTime;
     updatedAt: Schema.Attribute.DateTime;
@@ -535,7 +536,7 @@ export interface ApiLeagueLeague extends Struct.CollectionTypeSchema {
   };
   attributes: {
     continent: Schema.Attribute.Relation<
-      'oneToOne',
+      'manyToOne',
       'api::continent.continent'
     >;
     createdAt: Schema.Attribute.DateTime;
@@ -548,6 +549,7 @@ export interface ApiLeagueLeague extends Struct.CollectionTypeSchema {
       'api::league.league'
     > &
       Schema.Attribute.Private;
+    logo: Schema.Attribute.Media<'images'>;
     name: Schema.Attribute.String;
     publishedAt: Schema.Attribute.DateTime;
     updatedAt: Schema.Attribute.DateTime;

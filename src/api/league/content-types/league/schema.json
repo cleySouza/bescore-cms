@@ -14,12 +14,20 @@
     "name": {
       "type": "string"
     },
+    "logo": {
+      "type": "media",
+      "multiple": false,
+      "required": false,
+      "allowedTypes": [
+        "images"
+      ]
+    },
     "is_national_team": {
       "type": "boolean"
     },
     "continent": {
       "type": "relation",
-      "relation": "oneToOne",
+      "relation": "manyToOne",
       "target": "api::continent.continent"
     }
   }

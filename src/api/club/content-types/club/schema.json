@@ -29,7 +29,7 @@
     },
     "league": {
       "type": "relation",
-      "relation": "oneToOne",
+      "relation": "manyToOne",
       "target": "api::league.league"
     }
   }
