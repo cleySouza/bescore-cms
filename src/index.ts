@@ -5,12 +5,17 @@ import seedData from './seed/data.json';
 const FOLDER_MAP: Record<string, string> = {
   bundesliga: 'bundesleague',
   seriea: 'serieaitalia',
-  ligue1: 'ligue1france',
+  ligue1: 'ligue1',
   brasileiraoseriea: 'brasileirao',
+  ligaprofesionalargentina: 'sulamerica',
+  primeradivisionuruguay: 'sulamerica',
+  selecoessulamericanasconmebol: 'sulamerica',
+  selecoeseuropeiasuefa: 'europe',
 };
 
 const BASE_SHIELDS_DIR = path.join(process.cwd(), 'src/data/shields');
 const BOOTSTRAP_CLOUDINARY_UPLOAD_ENABLED = process.env.BOOTSTRAP_CLOUDINARY_UPLOAD === 'true';
+const BOOTSTRAP_FORCE_REUPLOAD = process.env.BOOTSTRAP_FORCE_REUPLOAD === 'true';
 
 let cloudinaryUploadsTemporarilyDisabled = false;
 
@@ -37,6 +42,7 @@ const LEAGUE_IMAGE_ALIASES: Record<string, string[]> = {
 const CONTINENT_IMAGE_ALIASES: Record<string, string[]> = {
   europe: ['europa'],
   southamerica: ['americasul', 'sudamerica'],
+  asia: ['asia'],
 };
 
 const STRIP_WORDS_REGEX = /\b(de|da|do|dos|das|del|la|el|the|club|football|team|logo|fc|cf|sc|ac|fk|afc|united)\b/gi;
@@ -151,6 +157,15 @@ const getLogoFileIdForContinent = (continentName: string, imageIndex: Map<string
   return findFileIdByKeys(keysToTry, imageIndex);
 };
 
+const resolveContinentLogoPath = (continentName: string): string | null => {
+  const continentKey = safeNormalizeKey(continentName);
+  const aliases = CONTINENT_IMAGE_ALIASES[continentKey] ?? [];
+  const namesToTry = [continentKey, ...aliases].filter(Boolean);
+
+  const candidates = namesToTry.map((name) => path.join(BASE_SHIELDS_DIR, 'continents', `${name}.png`));
+  return candidates.find((candidate) => fs.existsSync(candidate)) ?? null;
+};
+
 const hasMedia = (media: any): boolean => {
   if (!media) return false;
   if (Array.isArray(media)) return media.length > 0;
@@ -226,6 +241,9 @@ const attachMissingImages = async (strapi: any): Promise<void> => {
   }
 
   strapi.log.info('[SEED] 📤 Verificando uploads para Cloudinary...');
+  if (BOOTSTRAP_FORCE_REUPLOAD) {
+    strapi.log.warn('[SEED] ♻️  BOOTSTRAP_FORCE_REUPLOAD=true — reupload forçado habilitado (ignora mídia já vinculada).');
+  }
 
   if (!fs.existsSync(BASE_SHIELDS_DIR)) {
     strapi.log.warn(`[SEED] ⚠️  Pasta base de escudos não encontrada: ${BASE_SHIELDS_DIR}`);
@@ -242,7 +260,7 @@ const attachMissingImages = async (strapi: any): Promise<void> => {
 
   for (const continent of continents) {
     if (cloudinaryUploadsTemporarilyDisabled) break;
-    if (hasMedia(continent.logo)) continue;
+    if (!BOOTSTRAP_FORCE_REUPLOAD && hasMedia(continent.logo)) continue;
     if (!continent.id) continue;
     const continentKey = safeNormalizeKey(continent.name);
     if (!continentKey) {
@@ -250,13 +268,9 @@ const attachMissingImages = async (strapi: any): Promise<void> => {
       continue;
     }
 
-    const continentPath = path.join(
-      BASE_SHIELDS_DIR,
-      'continents',
-      `${continentKey}.png`
-    );
+    const continentPath = resolveContinentLogoPath(continent.name);
 
-    if (!fs.existsSync(continentPath)) continue;
+    if (!continentPath) continue;
 
     const uploaded = await uploadToCloudinary(
       strapi,
@@ -291,7 +305,7 @@ const attachMissingImages = async (strapi: any): Promise<void> => {
 
     if (!fs.existsSync(leagueDir)) continue;
 
-    if (!hasMedia(league.logo)) {
+    if (BOOTSTRAP_FORCE_REUPLOAD || !hasMedia(league.logo)) {
       const leagueLogoPath = resolveLeagueLogoPath(leagueDir, league.name, folderName);
 
       if (leagueLogoPath) {
@@ -327,7 +341,7 @@ const attachMissingImages = async (strapi: any): Promise<void> => {
 
     for (const club of clubs) {
       if (cloudinaryUploadsTemporarilyDisabled) break;
-      if (hasMedia(club.shield)) continue;
+      if (!BOOTSTRAP_FORCE_REUPLOAD && hasMedia(club.shield)) continue;
       if (!club.id) continue;
 
       const clubKey = safeNormalizeKey(club.name);
