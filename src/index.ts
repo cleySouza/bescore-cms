@@ -83,15 +83,15 @@ const uploadToCloudinary = async (
   refId: number,
   ref: string,
   field: string
-): Promise<void> => {
+): Promise<boolean> => {
   if (!filePath || typeof filePath !== 'string') {
     strapi.log.warn(`[SEED] ⚠️  Caminho de arquivo inválido para upload (${ref}.${field} refId=${refId}).`);
-    return;
+    return false;
   }
 
   if (!fs.existsSync(filePath)) {
     strapi.log.warn(`[SEED] ⚠️  Arquivo não encontrado para upload: ${filePath}`);
-    return;
+    return false;
   }
 
   const fileStat = fs.statSync(filePath);
@@ -104,16 +104,18 @@ const uploadToCloudinary = async (
         field,
       },
       files: {
-        path: filePath,
-        name: path.basename(filePath),
-        type: 'image/png',
+        filepath: filePath,
+        originalFilename: path.basename(filePath),
+        mimetype: 'image/png',
         size: fileStat.size,
       },
     });
+    return true;
   } catch (err: any) {
     strapi.log.error(
       `[SEED] ✗ Falha no upload Cloudinary (${ref}.${field} refId=${refId} file=${filePath}): ${err?.message}`
     );
+    return false;
   }
 };
 
@@ -159,9 +161,18 @@ const attachMissingImages = async (strapi: any): Promise<void> => {
 
     if (!fs.existsSync(continentPath)) continue;
 
-    await uploadToCloudinary(strapi, continentPath, continent.id, 'api::continent.continent', 'logo');
-    continentsUploaded++;
-    strapi.log.info(`[SEED] ✅ Continente atualizado com logo: ${continent.name}`);
+    const uploaded = await uploadToCloudinary(
+      strapi,
+      continentPath,
+      continent.id,
+      'api::continent.continent',
+      'logo'
+    );
+
+    if (uploaded) {
+      continentsUploaded++;
+      strapi.log.info(`[SEED] ✅ Continente atualizado com logo: ${continent.name}`);
+    }
   }
 
   const leagues = await (strapi as any).documents('api::league.league').findMany({
@@ -186,9 +197,18 @@ const attachMissingImages = async (strapi: any): Promise<void> => {
       const leagueLogoPath = resolveLeagueLogoPath(leagueDir, league.name, folderName);
 
       if (leagueLogoPath) {
-        await uploadToCloudinary(strapi, leagueLogoPath, league.id, 'api::league.league', 'logo');
-        leaguesUploaded++;
-        strapi.log.info(`[SEED] ✅ Liga atualizada com logo: ${league.name}`);
+        const uploaded = await uploadToCloudinary(
+          strapi,
+          leagueLogoPath,
+          league.id,
+          'api::league.league',
+          'logo'
+        );
+
+        if (uploaded) {
+          leaguesUploaded++;
+          strapi.log.info(`[SEED] ✅ Liga atualizada com logo: ${league.name}`);
+        }
       }
     }
 
@@ -221,15 +241,18 @@ const attachMissingImages = async (strapi: any): Promise<void> => {
 
       if (!matchedFile) continue;
 
-      await uploadToCloudinary(
+      const uploaded = await uploadToCloudinary(
         strapi,
         path.join(leagueDir, matchedFile),
         club.id,
         'api::club.club',
         'shield'
       );
-      clubsUploaded++;
-      strapi.log.info(`[SEED] ✅ Clube atualizado com escudo: ${club.name}`);
+
+      if (uploaded) {
+        clubsUploaded++;
+        strapi.log.info(`[SEED] ✅ Clube atualizado com escudo: ${club.name}`);
+      }
     }
   }
 
