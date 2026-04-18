@@ -12,6 +12,9 @@ const FOLDER_MAP: Record<string, string> = {
 };
 
 const BASE_SHIELDS_DIR = path.join(process.cwd(), 'src/data/shields');
+const BOOTSTRAP_CLOUDINARY_UPLOAD_ENABLED = process.env.BOOTSTRAP_CLOUDINARY_UPLOAD === 'true';
+
+let cloudinaryUploadsTemporarilyDisabled = false;
 
 const CLUB_IMAGE_ALIASES: Record<string, string[]> = {
   athleticoparanaense: ['athleticopr'],
@@ -112,8 +115,17 @@ const uploadToCloudinary = async (
     });
     return true;
   } catch (err: any) {
+    const errorMessage = String(err?.message ?? 'Erro desconhecido no upload');
+
+    if (errorMessage.includes('Invalid Signature')) {
+      cloudinaryUploadsTemporarilyDisabled = true;
+      strapi.log.error(
+        '[SEED] ✗ Cloudinary retornou Invalid Signature. Desabilitando uploads no bootstrap para evitar crash loop nesta inicialização.'
+      );
+    }
+
     strapi.log.error(
-      `[SEED] ✗ Falha no upload Cloudinary (${ref}.${field} refId=${refId} file=${filePath}): ${err?.message}`
+      `[SEED] ✗ Falha no upload Cloudinary (${ref}.${field} refId=${refId} file=${filePath}): ${errorMessage}`
     );
     return false;
   }
@@ -129,6 +141,13 @@ const resolveLeagueLogoPath = (leagueDir: string, leagueName: string, folderName
 };
 
 const attachMissingImages = async (strapi: any): Promise<void> => {
+  if (!BOOTSTRAP_CLOUDINARY_UPLOAD_ENABLED) {
+    strapi.log.info(
+      '[SEED] ⏭️  Upload bootstrap para Cloudinary desativado (defina BOOTSTRAP_CLOUDINARY_UPLOAD=true para habilitar).'
+    );
+    return;
+  }
+
   strapi.log.info('[SEED] 📤 Verificando uploads para Cloudinary...');
 
   if (!fs.existsSync(BASE_SHIELDS_DIR)) {
@@ -145,6 +164,7 @@ const attachMissingImages = async (strapi: any): Promise<void> => {
   });
 
   for (const continent of continents) {
+    if (cloudinaryUploadsTemporarilyDisabled) break;
     if (hasMedia(continent.logo)) continue;
     if (!continent.id) continue;
     const continentKey = safeNormalizeKey(continent.name);
@@ -180,6 +200,7 @@ const attachMissingImages = async (strapi: any): Promise<void> => {
   });
 
   for (const league of leagues) {
+    if (cloudinaryUploadsTemporarilyDisabled) break;
     if (!league.id) continue;
 
     const normalizedLeagueName = safeNormalizeKey(league.name);
@@ -228,6 +249,7 @@ const attachMissingImages = async (strapi: any): Promise<void> => {
       .filter((fileName) => fileName.toLowerCase().endsWith('.png'));
 
     for (const club of clubs) {
+      if (cloudinaryUploadsTemporarilyDisabled) break;
       if (hasMedia(club.shield)) continue;
       if (!club.id) continue;
 
