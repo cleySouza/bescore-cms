@@ -2,8 +2,6 @@ import fs from 'fs';
 import path from 'path';
 import seedData from './seed/data.json';
 
-const TARGET_LEAGUES_FOR_SHIELDS = ['Serie A', 'Brasileirão Série A'];
-
 const FOLDER_MAP: Record<string, string> = {
   bundesliga: 'bundesleague',
   seriea: 'serieaitalia',
@@ -22,6 +20,18 @@ const CLUB_IMAGE_ALIASES: Record<string, string[]> = {
   saopaulo: ['saopaulo'],
   vascodagama: ['vasco'],
   verona: ['hellasverona'],
+};
+
+const LEAGUE_IMAGE_ALIASES: Record<string, string[]> = {
+  seriea: ['serieaitalia'],
+  brasileiraoseriea: ['brasileirao'],
+  selecoeseuropeiasuefa: ['uefalogo', 'uefa'],
+  selecoessulamericanasconmebol: ['conmebol'],
+};
+
+const CONTINENT_IMAGE_ALIASES: Record<string, string[]> = {
+  europe: ['europa'],
+  southamerica: ['americasul', 'sudamerica'],
 };
 
 const normalizeKey = (value: string): string => {
@@ -72,6 +82,42 @@ const getShieldFileIdForClub = (clubName: string, imageIndex: Map<string, number
   }
 
   return null;
+};
+
+const findFileIdByKeys = (keys: string[], imageIndex: Map<string, number>): number | null => {
+  const normalized = keys
+    .map((key) => normalizeKey(key))
+    .filter((key) => key.length > 0);
+
+  for (const key of normalized) {
+    const fileId = imageIndex.get(key);
+    if (fileId) return fileId;
+  }
+
+  // Fallback por similaridade para cobrir diferenças pequenas de nome.
+  const candidates = Array.from(imageIndex.entries());
+  for (const key of normalized) {
+    if (key.length < 4) continue;
+    const similar = candidates.find(([fileKey]) => fileKey.includes(key) || key.includes(fileKey));
+    if (similar) return similar[1];
+  }
+
+  return null;
+};
+
+const getLogoFileIdForLeague = (leagueName: string, imageIndex: Map<string, number>): number | null => {
+  const leagueKey = normalizeKey(leagueName);
+  const folderAlias = FOLDER_MAP[leagueKey];
+  const aliases = LEAGUE_IMAGE_ALIASES[leagueKey] ?? [];
+  const keysToTry = [leagueKey, folderAlias ?? '', ...aliases].filter(Boolean);
+  return findFileIdByKeys(keysToTry, imageIndex);
+};
+
+const getLogoFileIdForContinent = (continentName: string, imageIndex: Map<string, number>): number | null => {
+  const continentKey = normalizeKey(continentName);
+  const aliases = CONTINENT_IMAGE_ALIASES[continentKey] ?? [];
+  const keysToTry = [continentKey, ...aliases];
+  return findFileIdByKeys(keysToTry, imageIndex);
 };
 
 const hasMedia = (media: any): boolean => {
@@ -296,13 +342,6 @@ const attachMissingClubShields = async (strapi: any): Promise<void> => {
   const imageIndex = buildUploadImageIndex(uploadFiles);
 
   const clubs = await strapi.db.query('api::club.club').findMany({
-    where: {
-      league: {
-        name: {
-          $in: TARGET_LEAGUES_FOR_SHIELDS,
-        },
-      },
-    },
     populate: {
       league: true,
       shield: {
@@ -311,9 +350,71 @@ const attachMissingClubShields = async (strapi: any): Promise<void> => {
     },
   });
 
+  const leagues = await strapi.db.query('api::league.league').findMany({
+    populate: {
+      logo: {
+        select: ['id'],
+      },
+    },
+  });
+
+  const continents = await strapi.db.query('api::continent.continent').findMany({
+    populate: {
+      logo: {
+        select: ['id'],
+      },
+    },
+  });
+
   let attachedCount = 0;
   let skippedWithShieldCount = 0;
   let missingImageCount = 0;
+  let leaguesAttachedCount = 0;
+  let leaguesMissingImageCount = 0;
+  let continentsAttachedCount = 0;
+  let continentsMissingImageCount = 0;
+
+  for (const continent of continents) {
+    if (continent.logo?.id) continue;
+
+    const logoFileId = getLogoFileIdForContinent(continent.name, imageIndex);
+
+    if (!logoFileId) {
+      continentsMissingImageCount++;
+      strapi.log.warn(`[SEED] ⚠️  Logo não encontrado para continente: "${continent.name}"`);
+      continue;
+    }
+
+    await strapi.entityService.update('api::continent.continent', continent.id, {
+      data: {
+        logo: logoFileId,
+      },
+    });
+
+    continentsAttachedCount++;
+    strapi.log.info(`[SEED] 🌍 Logo vinculado ao continente "${continent.name}" (arquivo id=${logoFileId})`);
+  }
+
+  for (const league of leagues) {
+    if (league.logo?.id) continue;
+
+    const logoFileId = getLogoFileIdForLeague(league.name, imageIndex);
+
+    if (!logoFileId) {
+      leaguesMissingImageCount++;
+      strapi.log.warn(`[SEED] ⚠️  Logo não encontrado para liga: "${league.name}"`);
+      continue;
+    }
+
+    await strapi.entityService.update('api::league.league', league.id, {
+      data: {
+        logo: logoFileId,
+      },
+    });
+
+    leaguesAttachedCount++;
+    strapi.log.info(`[SEED] 🏆 Logo vinculado à liga "${league.name}" (arquivo id=${logoFileId})`);
+  }
 
   for (const club of clubs) {
     if (club.shield?.id) {
@@ -340,7 +441,7 @@ const attachMissingClubShields = async (strapi: any): Promise<void> => {
   }
 
   strapi.log.info(
-    `[SEED] 🧩 Vínculo de escudos concluído — vinculados: ${attachedCount}, já tinham escudo: ${skippedWithShieldCount}, sem imagem correspondente: ${missingImageCount}`
+    `[SEED] 🧩 Vínculo concluído — continentes vinculados: ${continentsAttachedCount}, continentes sem imagem: ${continentsMissingImageCount}, ligas vinculadas: ${leaguesAttachedCount}, ligas sem imagem: ${leaguesMissingImageCount}, clubes vinculados: ${attachedCount}, clubes já tinham escudo: ${skippedWithShieldCount}, clubes sem imagem correspondente: ${missingImageCount}`
   );
 };
 
