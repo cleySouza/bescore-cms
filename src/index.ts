@@ -2,15 +2,56 @@ import fs from 'fs';
 import path from 'path';
 import seedData from './seed/data.json';
 
-const FOLDER_MAP: Record<string, string> = {
-  bundesliga: 'bundesleague',
-  seriea: 'serieaitalia',
-  ligue1: 'ligue1',
-  brasileiraoseriea: 'brasileirao',
-  ligaprofesionalargentina: 'sulamerica',
-  primeradivisionuruguay: 'sulamerica',
-  selecoessulamericanasconmebol: 'sulamerica',
-  selecoeseuropeiasuefa: 'europe',
+type LeagueFolderConfig = {
+  folder: string;
+  leagueLogoBaseNames: string[];
+};
+
+const LEAGUE_FOLDER_CONFIG: Record<string, LeagueFolderConfig> = {
+  premierleague: {
+    folder: 'premierleague',
+    leagueLogoBaseNames: ['premierleague'],
+  },
+  laliga: {
+    folder: 'laliga',
+    leagueLogoBaseNames: ['laliga'],
+  },
+  bundesliga: {
+    folder: 'bundesleague',
+    leagueLogoBaseNames: ['bundesliga'],
+  },
+  seriea: {
+    folder: 'serieaitalia',
+    leagueLogoBaseNames: ['serieaitalia', 'seriea'],
+  },
+  ligue1: {
+    folder: 'ligue1',
+    leagueLogoBaseNames: ['ligue1'],
+  },
+  brasileiraoseriea: {
+    folder: 'brasileirao',
+    leagueLogoBaseNames: ['brasileirao', 'brasileirao'],
+  },
+  ligaprofesionalargentina: {
+    folder: 'sulamerica',
+    leagueLogoBaseNames: ['argentina'],
+  },
+  primeradivisionuruguay: {
+    folder: 'sulamerica',
+    leagueLogoBaseNames: ['uruguai', 'uruguay'],
+  },
+  selecoessulamericanasconmebol: {
+    folder: 'sulamerica',
+    leagueLogoBaseNames: ['conmebol'],
+  },
+  selecoeseuropeiasuefa: {
+    folder: 'europe',
+    leagueLogoBaseNames: ['uefalogo', 'uefa'],
+  },
+  selecoesasiaticasafc: {
+    folder: 'sulamerica/asiaoceania',
+    leagueLogoBaseNames: ['asia'],
+  },
 };
 
 const BASE_SHIELDS_DIR = path.join(process.cwd(), 'src/data/shields');
@@ -23,6 +64,8 @@ let cloudinaryUploadsTemporarilyDisabled = false;
 const CLUB_IMAGE_ALIASES: Record<string, string[]> = {
   athleticoparanaense: ['athleticopr'],
   athleticbilbao: ['athleticobilbao'],
+  belarus: ['bielorussia', 'bielorrussia'],
+  bielorrussia: ['bielorussia', 'belarus'],
   celtavigo: ['celtadevigo'],
   interdemilano: ['internazionalemilano', 'inter'],
   mancity: ['manchestercity'],
@@ -38,6 +81,7 @@ const LEAGUE_IMAGE_ALIASES: Record<string, string[]> = {
   brasileiraoseriea: ['brasileirao'],
   selecoeseuropeiasuefa: ['uefalogo', 'uefa'],
   selecoessulamericanasconmebol: ['conmebol'],
+  selecoesasiaticasafc: ['asia'],
 };
 
 const CONTINENT_IMAGE_ALIASES: Record<string, string[]> = {
@@ -47,6 +91,7 @@ const CONTINENT_IMAGE_ALIASES: Record<string, string[]> = {
 };
 
 const STRIP_WORDS_REGEX = /\b(de|da|do|dos|das|del|la|el|the|club|football|team|logo|fc|cf|sc|ac|fk|afc|united)\b/gi;
+const PNG_EXTENSION = '.png';
 
 const normalizeKey = (value: string): string => {
   return value
@@ -59,6 +104,14 @@ const normalizeKey = (value: string): string => {
 const safeNormalizeKey = (value: unknown): string => {
   if (typeof value !== 'string') return '';
   return normalizeKey(value);
+};
+
+const getLeagueFolderConfig = (leagueName: string): LeagueFolderConfig => {
+  const leagueKey = safeNormalizeKey(leagueName);
+  return LEAGUE_FOLDER_CONFIG[leagueKey] ?? {
+    folder: leagueKey,
+    leagueLogoBaseNames: [leagueKey],
+  };
 };
 
 const stripImageNameNoise = (value: string): string => {
@@ -144,10 +197,15 @@ const findFileIdByKeys = (keys: string[], imageIndex: Map<string, number>): numb
 };
 
 const getLogoFileIdForLeague = (leagueName: string, imageIndex: Map<string, number>): number | null => {
-  const leagueKey = normalizeKey(leagueName);
-  const folderAlias = FOLDER_MAP[leagueKey];
+  const leagueKey = safeNormalizeKey(leagueName);
+  const leagueConfig = getLeagueFolderConfig(leagueName);
   const aliases = LEAGUE_IMAGE_ALIASES[leagueKey] ?? [];
-  const keysToTry = [leagueKey, folderAlias ?? '', ...aliases].filter(Boolean);
+  const keysToTry = [
+    leagueKey,
+    leagueConfig.folder,
+    ...leagueConfig.leagueLogoBaseNames,
+    ...aliases,
+  ].filter(Boolean);
   return findFileIdByKeys(keysToTry, imageIndex);
 };
 
@@ -208,6 +266,15 @@ const uploadToCloudinary = async (
   }
 
   const originalFilename = path.basename(filePath);
+  const extension = path.extname(originalFilename).toLowerCase();
+
+  if (extension !== PNG_EXTENSION) {
+    strapi.log.warn(
+      `[SEED] ⏭️  Arquivo ignorado (somente PNG permitido): ${originalFilename}`
+    );
+    return false;
+  }
+
   const rawNameKey = originalFilename.toLowerCase();
   const cleanedNameKey = normalizeKey(stripImageNameNoise(originalFilename));
   const existingFileId =
@@ -278,11 +345,17 @@ const uploadToCloudinary = async (
   }
 };
 
-const resolveLeagueLogoPath = (leagueDir: string, leagueName: string, folderName: string): string | null => {
-  const candidates = [
-    path.join(leagueDir, `${safeNormalizeKey(leagueName)}.png`),
-    path.join(leagueDir, `${folderName}.png`),
-  ];
+const resolveLeagueLogoPath = (
+  leagueDir: string,
+  leagueName: string,
+  folderName: string,
+  logoBaseNames: string[]
+): string | null => {
+  const fileBaseNames = [safeNormalizeKey(leagueName), folderName, ...logoBaseNames]
+    .map((name) => safeNormalizeKey(name))
+    .filter(Boolean);
+
+  const candidates = fileBaseNames.map((baseName) => path.join(leagueDir, `${baseName}.png`));
 
   return candidates.find((candidate) => fs.existsSync(candidate)) ?? null;
 };
@@ -361,18 +434,24 @@ const attachMissingImages = async (strapi: any): Promise<void> => {
       continue;
     }
 
-    const folderName = FOLDER_MAP[normalizedLeagueName] || normalizedLeagueName;
+    const leagueConfig = getLeagueFolderConfig(league.name);
+    const folderName = leagueConfig.folder;
     const leagueDir = path.join(BASE_SHIELDS_DIR, folderName);
 
     if (!fs.existsSync(leagueDir)) continue;
 
     if (BOOTSTRAP_FORCE_REUPLOAD || !hasMedia(league.logo)) {
-      const leagueLogoPath = resolveLeagueLogoPath(leagueDir, league.name, folderName);
+      const leagueLogoPathResolved = resolveLeagueLogoPath(
+        leagueDir,
+        league.name,
+        folderName,
+        leagueConfig.leagueLogoBaseNames
+      );
 
-      if (leagueLogoPath) {
+      if (leagueLogoPathResolved) {
         const uploaded = await uploadToCloudinary(
           strapi,
-          leagueLogoPath,
+          leagueLogoPathResolved,
           league.id,
           'api::league.league',
           'logo',
@@ -399,7 +478,7 @@ const attachMissingImages = async (strapi: any): Promise<void> => {
 
     const folderFiles = fs
       .readdirSync(leagueDir)
-      .filter((fileName) => fileName.toLowerCase().endsWith('.png'));
+      .filter((fileName) => fileName.toLowerCase().endsWith(PNG_EXTENSION));
 
     for (const club of clubs) {
       if (cloudinaryUploadsTemporarilyDisabled) break;
@@ -409,9 +488,13 @@ const attachMissingImages = async (strapi: any): Promise<void> => {
       const clubKey = safeNormalizeKey(club.name);
       if (!clubKey) continue;
 
+      const compactClubKey = normalizedCompact(club.name);
+      const aliasKeys = (CLUB_IMAGE_ALIASES[clubKey] ?? []).map((alias) => normalizeKey(alias));
+      const keysToTry = [clubKey, compactClubKey, ...aliasKeys].filter((key) => key.length > 0);
+
       const matchedFile = folderFiles.find((fileName) => {
         const fileKey = normalizeKey(stripImageNameNoise(fileName));
-        return fileKey.includes(clubKey);
+        return keysToTry.some((key) => fileKey.includes(key) || key.includes(fileKey));
       });
 
       if (!matchedFile) continue;
