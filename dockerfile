@@ -10,7 +10,7 @@ WORKDIR /opt/
 # Copia apenas os arquivos de manifesto primeiro para aproveitar o cache
 COPY package.json package-lock.json ./ 
 # No Docker, usamos --frozen-lockfile ou apenas npm install para garantir consistência
-RUN npm install --include=dev
+RUN npm install
 
 WORKDIR /opt/app
 COPY . .
@@ -22,12 +22,12 @@ RUN apk add --no-cache vips-dev
 ARG NODE_ENV=production
 ENV NODE_ENV=${NODE_ENV}
 
-WORKDIR /opt/
-COPY --from=build /opt/node_modules ./node_modules
 WORKDIR /opt/app
+# Copiamos tudo do build para a pasta app, mantendo a estrutura
+COPY --from=build /opt/node_modules ./node_modules
 COPY --from=build /opt/app ./
 
-ENV PATH /opt/node_modules/.bin:$PATH
+ENV PATH /opt/app/node_modules/.bin:$PATH
 
 RUN chown -R node:node /opt/app
 USER node
