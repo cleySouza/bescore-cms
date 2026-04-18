@@ -16,10 +16,15 @@ let cloudinaryUploadsTemporarilyDisabled = false;
 
 const CLUB_IMAGE_ALIASES: Record<string, string[]> = {
   athleticoparanaense: ['athleticopr'],
+  athleticbilbao: ['athleticobilbao'],
+  celtavigo: ['celtadevigo'],
   interdemilano: ['internazionalemilano', 'inter'],
+  mancity: ['manchestercity'],
+  manutd: ['manchesterunited'],
   saopaulo: ['saopaulo'],
   vascodagama: ['vasco'],
   verona: ['hellasverona'],
+  wolves: ['wolverhamptonwanderers'],
 };
 
 const LEAGUE_IMAGE_ALIASES: Record<string, string[]> = {
@@ -33,6 +38,8 @@ const CONTINENT_IMAGE_ALIASES: Record<string, string[]> = {
   europe: ['europa'],
   southamerica: ['americasul', 'sudamerica'],
 };
+
+const STRIP_WORDS_REGEX = /\b(de|da|do|dos|das|del|la|el|the|club|football|team|logo|fc|cf|sc|ac|fk|afc|united)\b/gi;
 
 const normalizeKey = (value: string): string => {
   return value
@@ -61,13 +68,20 @@ const stripImageNameNoise = (value: string): string => {
     .replace(/_[a-f0-9]{10}$/i, '');
 };
 
+const normalizedCompact = (value: string): string => {
+  return normalizeKey(value.replace(STRIP_WORDS_REGEX, ' '));
+};
+
 const buildUploadImageIndex = (files: any[]): Map<string, number> => {
   const index = new Map<string, number>();
 
   for (const file of files) {
     const candidates = [file?.name, file?.hash]
       .filter(Boolean)
-      .map((candidate: string) => normalizeKey(stripImageNameNoise(candidate)));
+      .flatMap((candidate: string) => {
+        const base = stripImageNameNoise(candidate);
+        return [normalizeKey(base), normalizedCompact(base)];
+      });
 
     for (const key of candidates) {
       if (!key || index.has(key)) continue;
@@ -80,8 +94,9 @@ const buildUploadImageIndex = (files: any[]): Map<string, number> => {
 
 const getShieldFileIdForClub = (clubName: string, imageIndex: Map<string, number>): number | null => {
   const clubKey = normalizeKey(clubName);
+  const compactClubKey = normalizedCompact(clubName);
   const aliasKeys = CLUB_IMAGE_ALIASES[clubKey] ?? [];
-  const keysToTry = [clubKey, ...aliasKeys.map(normalizeKey)];
+  const keysToTry = [clubKey, compactClubKey, ...aliasKeys.map(normalizeKey)];
 
   for (const key of keysToTry) {
     const fileId = imageIndex.get(key);
