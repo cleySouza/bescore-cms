@@ -29,6 +29,11 @@ const normalizeKey = (value: string): string => {
     .replace(/[^a-z0-9]/g, '');
 };
 
+const safeNormalizeKey = (value: unknown): string => {
+  if (typeof value !== 'string') return '';
+  return normalizeKey(value);
+};
+
 const stripImageNameNoise = (value: string): string => {
   return value
     .replace(/\.[^/.]+$/, '')
@@ -74,31 +79,47 @@ const hasMedia = (media: any): boolean => {
 
 const uploadToCloudinary = async (
   strapi: any,
-  filePath: string,
+  filePath: string | undefined,
   refId: number,
   ref: string,
   field: string
 ): Promise<void> => {
+  if (!filePath || typeof filePath !== 'string') {
+    strapi.log.warn(`[SEED] ⚠️  Caminho de arquivo inválido para upload (${ref}.${field} refId=${refId}).`);
+    return;
+  }
+
+  if (!fs.existsSync(filePath)) {
+    strapi.log.warn(`[SEED] ⚠️  Arquivo não encontrado para upload: ${filePath}`);
+    return;
+  }
+
   const fileStat = fs.statSync(filePath);
 
-  await strapi.plugins.upload.services.upload.upload({
-    data: {
-      refId: String(refId),
-      ref,
-      field,
-    },
-    files: {
-      path: filePath,
-      name: path.basename(filePath),
-      type: 'image/png',
-      size: fileStat.size,
-    },
-  });
+  try {
+    await strapi.plugins.upload.services.upload.upload({
+      data: {
+        refId: String(refId),
+        ref,
+        field,
+      },
+      files: {
+        path: filePath,
+        name: path.basename(filePath),
+        type: 'image/png',
+        size: fileStat.size,
+      },
+    });
+  } catch (err: any) {
+    strapi.log.error(
+      `[SEED] ✗ Falha no upload Cloudinary (${ref}.${field} refId=${refId} file=${filePath}): ${err?.message}`
+    );
+  }
 };
 
 const resolveLeagueLogoPath = (leagueDir: string, leagueName: string, folderName: string): string | null => {
   const candidates = [
-    path.join(leagueDir, `${normalizeKey(leagueName)}.png`),
+    path.join(leagueDir, `${safeNormalizeKey(leagueName)}.png`),
     path.join(leagueDir, `${folderName}.png`),
   ];
 
@@ -124,11 +145,16 @@ const attachMissingImages = async (strapi: any): Promise<void> => {
   for (const continent of continents) {
     if (hasMedia(continent.logo)) continue;
     if (!continent.id) continue;
+    const continentKey = safeNormalizeKey(continent.name);
+    if (!continentKey) {
+      strapi.log.warn(`[SEED] ⚠️  Continente sem nome válido, pulando upload (id=${continent.id}).`);
+      continue;
+    }
 
     const continentPath = path.join(
       BASE_SHIELDS_DIR,
       'continents',
-      `${normalizeKey(continent.name)}.png`
+      `${continentKey}.png`
     );
 
     if (!fs.existsSync(continentPath)) continue;
@@ -145,7 +171,12 @@ const attachMissingImages = async (strapi: any): Promise<void> => {
   for (const league of leagues) {
     if (!league.id) continue;
 
-    const normalizedLeagueName = normalizeKey(league.name);
+    const normalizedLeagueName = safeNormalizeKey(league.name);
+    if (!normalizedLeagueName) {
+      strapi.log.warn(`[SEED] ⚠️  Liga sem nome válido, pulando upload (id=${league.id}).`);
+      continue;
+    }
+
     const folderName = FOLDER_MAP[normalizedLeagueName] || normalizedLeagueName;
     const leagueDir = path.join(BASE_SHIELDS_DIR, folderName);
 
@@ -165,7 +196,7 @@ const attachMissingImages = async (strapi: any): Promise<void> => {
       filters: {
         league: {
           documentId: {
-            $eq: league.documentId,
+            $eq: league.documentId ?? '',
           },
         },
       },
@@ -180,7 +211,9 @@ const attachMissingImages = async (strapi: any): Promise<void> => {
       if (hasMedia(club.shield)) continue;
       if (!club.id) continue;
 
-      const clubKey = normalizeKey(club.name);
+      const clubKey = safeNormalizeKey(club.name);
+      if (!clubKey) continue;
+
       const matchedFile = folderFiles.find((fileName) => {
         const fileKey = normalizeKey(stripImageNameNoise(fileName));
         return fileKey.includes(clubKey);
