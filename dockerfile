@@ -1,22 +1,23 @@
 # --- ESTÁGIO 1: Build ---
 FROM node:20-alpine AS build
-# Dependências necessárias para compilar o Sharp (essencial para as imagens do BeScore)
+# Instalando dependências para pacotes nativos
 RUN apk update && apk add --no-cache build-base gcc autoconf automake zlib-dev libpng-dev vips-dev > /dev/null 2>&1
 
 ARG NODE_ENV=production
 ENV NODE_ENV=${NODE_ENV}
 
 WORKDIR /opt/
-COPY package.json yarn.lock ./ 
-RUN yarn config set network-timeout 600000 -g && yarn install --production=false
+# Copia apenas os arquivos de manifesto primeiro para aproveitar o cache
+COPY package.json package-lock.json ./ 
+# No Docker, usamos --frozen-lockfile ou apenas npm install para garantir consistência
+RUN npm install --include=dev
 
 WORKDIR /opt/app
 COPY . .
-RUN yarn build
+RUN npm run build
 
 # --- ESTÁGIO 2: Runtime ---
 FROM node:20-alpine
-# Libvips é necessária para o processamento de imagens do Strapi 5
 RUN apk add --no-cache vips-dev
 ARG NODE_ENV=production
 ENV NODE_ENV=${NODE_ENV}
@@ -32,4 +33,4 @@ RUN chown -R node:node /opt/app
 USER node
 
 EXPOSE 1337
-CMD ["yarn", "start"]
+CMD ["npm", "run", "start"]
