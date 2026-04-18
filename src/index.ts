@@ -49,8 +49,15 @@ const safeNormalizeKey = (value: unknown): string => {
 
 const stripImageNameNoise = (value: string): string => {
   return value
-    .replace(/\.[^/.]+$/, '')
+    // remove índices/prefixos comuns: "1._", "01-", "2__", etc.
+    .replace(/^\d+[._-]*/i, '')
+    // remove sufixos de extensão encadeada: ".svg.png", ".jpeg", etc.
+    .replace(/(\.[a-z0-9]+)+$/i, '')
     .replace(/^(thumbnail_|small_|medium_|large_)/i, '')
+    // remove rótulos muito comuns em nome de arquivo
+    .replace(/(^|[_\-.])(logo|escudo|shield)($|[_\-.])/gi, '_')
+    .replace(/(^|[_\-.])(fc|cf)($|[_\-.])/gi, '_')
+    .replace(/[_\-.]{2,}/g, '_')
     .replace(/_[a-f0-9]{10}$/i, '');
 };
 
@@ -79,6 +86,15 @@ const getShieldFileIdForClub = (clubName: string, imageIndex: Map<string, number
   for (const key of keysToTry) {
     const fileId = imageIndex.get(key);
     if (fileId) return fileId;
+  }
+
+  // Fallback por similaridade para lidar com nomes como
+  // "1._FC_Union_Berlin_Logo.svg.png".
+  const candidates = Array.from(imageIndex.entries());
+  for (const key of keysToTry) {
+    if (!key || key.length < 4) continue;
+    const similar = candidates.find(([fileKey]) => fileKey.includes(key) || key.includes(fileKey));
+    if (similar) return similar[1];
   }
 
   return null;
