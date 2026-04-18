@@ -16,6 +16,7 @@ const FOLDER_MAP: Record<string, string> = {
 const BASE_SHIELDS_DIR = path.join(process.cwd(), 'src/data/shields');
 const BOOTSTRAP_CLOUDINARY_UPLOAD_ENABLED = process.env.BOOTSTRAP_CLOUDINARY_UPLOAD === 'true';
 const BOOTSTRAP_FORCE_REUPLOAD = process.env.BOOTSTRAP_FORCE_REUPLOAD === 'true';
+const BOOTSTRAP_RUN_MEDIA_REPAIR = process.env.BOOTSTRAP_RUN_MEDIA_REPAIR === 'true';
 
 let cloudinaryUploadsTemporarilyDisabled = false;
 
@@ -172,12 +173,29 @@ const hasMedia = (media: any): boolean => {
   return Boolean(media.id || media.documentId);
 };
 
+const buildUploadNameIndex = (files: any[]): Map<string, number> => {
+  const index = new Map<string, number>();
+
+  for (const file of files) {
+    if (!file?.id || !file?.name) continue;
+
+    const rawNameKey = String(file.name).toLowerCase();
+    const cleanedNameKey = normalizeKey(stripImageNameNoise(String(file.name)));
+
+    if (rawNameKey && !index.has(rawNameKey)) index.set(rawNameKey, file.id);
+    if (cleanedNameKey && !index.has(cleanedNameKey)) index.set(cleanedNameKey, file.id);
+  }
+
+  return index;
+};
+
 const uploadToCloudinary = async (
   strapi: any,
   filePath: string | undefined,
   refId: number,
   ref: string,
-  field: string
+  field: string,
+  uploadNameIndex?: Map<string, number>
 ): Promise<boolean> => {
   if (!filePath || typeof filePath !== 'string') {
     strapi.log.warn(`[SEED] ⚠️  Caminho de arquivo inválido para upload (${ref}.${field} refId=${refId}).`);
@@ -187,6 +205,25 @@ const uploadToCloudinary = async (
   if (!fs.existsSync(filePath)) {
     strapi.log.warn(`[SEED] ⚠️  Arquivo não encontrado para upload: ${filePath}`);
     return false;
+  }
+
+  const originalFilename = path.basename(filePath);
+  const rawNameKey = originalFilename.toLowerCase();
+  const cleanedNameKey = normalizeKey(stripImageNameNoise(originalFilename));
+  const existingFileId =
+    uploadNameIndex?.get(rawNameKey) ??
+    uploadNameIndex?.get(cleanedNameKey);
+
+  if (!BOOTSTRAP_FORCE_REUPLOAD && existingFileId) {
+    await strapi.entityService.update(ref, refId, {
+      data: {
+        [field]: existingFileId,
+      },
+    });
+    strapi.log.info(
+      `[SEED] ♻️  Upload evitado (${ref}.${field} refId=${refId}) — reutilizando arquivo existente id=${existingFileId} (${originalFilename}).`
+    );
+    return true;
   }
 
   const fileStat = fs.statSync(filePath);
@@ -200,11 +237,29 @@ const uploadToCloudinary = async (
       },
       files: {
         filepath: filePath,
-        originalFilename: path.basename(filePath),
+        originalFilename,
         mimetype: 'image/png',
         size: fileStat.size,
       },
     });
+
+    // Atualiza o índice para evitar reuploads do mesmo arquivo no mesmo bootstrap.
+    try {
+      const [storedFile] = await strapi.db.query('plugin::upload.file').findMany({
+        where: { name: { $eq: originalFilename } },
+        select: ['id', 'name'],
+        orderBy: { id: 'desc' },
+        limit: 1,
+      });
+
+      if (storedFile?.id && storedFile?.name && uploadNameIndex) {
+        uploadNameIndex.set(String(storedFile.name).toLowerCase(), storedFile.id);
+        uploadNameIndex.set(normalizeKey(stripImageNameNoise(String(storedFile.name))), storedFile.id);
+      }
+    } catch {
+      // não bloqueia o bootstrap se a atualização do índice falhar
+    }
+
     return true;
   } catch (err: any) {
     const errorMessage = String(err?.message ?? 'Erro desconhecido no upload');
@@ -254,6 +309,11 @@ const attachMissingImages = async (strapi: any): Promise<void> => {
   let leaguesUploaded = 0;
   let clubsUploaded = 0;
 
+  const existingUploadFiles = await strapi.db.query('plugin::upload.file').findMany({
+    select: ['id', 'name'],
+  });
+  const uploadNameIndex = buildUploadNameIndex(existingUploadFiles);
+
   const continents = await (strapi as any).documents('api::continent.continent').findMany({
     populate: ['logo'],
   });
@@ -277,7 +337,8 @@ const attachMissingImages = async (strapi: any): Promise<void> => {
       continentPath,
       continent.id,
       'api::continent.continent',
-      'logo'
+      'logo',
+      uploadNameIndex
     );
 
     if (uploaded) {
@@ -314,7 +375,8 @@ const attachMissingImages = async (strapi: any): Promise<void> => {
           leagueLogoPath,
           league.id,
           'api::league.league',
-          'logo'
+          'logo',
+          uploadNameIndex
         );
 
         if (uploaded) {
@@ -359,7 +421,8 @@ const attachMissingImages = async (strapi: any): Promise<void> => {
         path.join(leagueDir, matchedFile),
         club.id,
         'api::club.club',
-        'shield'
+        'shield',
+        uploadNameIndex
       );
 
       if (uploaded) {
@@ -523,8 +586,13 @@ export default {
         strapi.log.info(
           `[SEED] ⏭️  Banco já possui ${existingCount} continente(s). Seed ignorado.`
         );
-        await attachMissingImages(strapi);
-        await attachMissingClubShields(strapi);
+        if (BOOTSTRAP_RUN_MEDIA_REPAIR) {
+          strapi.log.warn('[SEED] 🛠️  BOOTSTRAP_RUN_MEDIA_REPAIR=true — executando reparo de mídias no startup.');
+          await attachMissingImages(strapi);
+          await attachMissingClubShields(strapi);
+        } else {
+          strapi.log.info('[SEED] ⏭️  Reparo de mídias desativado no startup (defina BOOTSTRAP_RUN_MEDIA_REPAIR=true para executar).');
+        }
         strapi.log.info(
           '[SEED]    Para recriar tudo: SEED_DATA=force npm run dev  ⚠️  apaga imagens!'
         );
