@@ -1,6 +1,17 @@
+import fs from 'fs';
+import path from 'path';
 import seedData from './seed/data.json';
 
 const TARGET_LEAGUES_FOR_SHIELDS = ['Serie A', 'Brasileirão Série A'];
+
+const FOLDER_MAP: Record<string, string> = {
+  bundesliga: 'bundesleague',
+  seriea: 'serieaitalia',
+  ligue1: 'ligue1france',
+  brasileiraoseriea: 'brasileirao',
+};
+
+const BASE_SHIELDS_DIR = path.join(process.cwd(), 'src/data/shields');
 
 const CLUB_IMAGE_ALIASES: Record<string, string[]> = {
   athleticoparanaense: ['athleticopr'],
@@ -53,6 +64,145 @@ const getShieldFileIdForClub = (clubName: string, imageIndex: Map<string, number
   }
 
   return null;
+};
+
+const hasMedia = (media: any): boolean => {
+  if (!media) return false;
+  if (Array.isArray(media)) return media.length > 0;
+  return Boolean(media.id || media.documentId);
+};
+
+const uploadToCloudinary = async (
+  strapi: any,
+  filePath: string,
+  refId: number,
+  ref: string,
+  field: string
+): Promise<void> => {
+  const fileStat = fs.statSync(filePath);
+
+  await strapi.plugins.upload.services.upload.upload({
+    data: {
+      refId: String(refId),
+      ref,
+      field,
+    },
+    files: {
+      path: filePath,
+      name: path.basename(filePath),
+      type: 'image/png',
+      size: fileStat.size,
+    },
+  });
+};
+
+const resolveLeagueLogoPath = (leagueDir: string, leagueName: string, folderName: string): string | null => {
+  const candidates = [
+    path.join(leagueDir, `${normalizeKey(leagueName)}.png`),
+    path.join(leagueDir, `${folderName}.png`),
+  ];
+
+  return candidates.find((candidate) => fs.existsSync(candidate)) ?? null;
+};
+
+const attachMissingImages = async (strapi: any): Promise<void> => {
+  strapi.log.info('[SEED] 📤 Verificando uploads para Cloudinary...');
+
+  if (!fs.existsSync(BASE_SHIELDS_DIR)) {
+    strapi.log.warn(`[SEED] ⚠️  Pasta base de escudos não encontrada: ${BASE_SHIELDS_DIR}`);
+    return;
+  }
+
+  let continentsUploaded = 0;
+  let leaguesUploaded = 0;
+  let clubsUploaded = 0;
+
+  const continents = await (strapi as any).documents('api::continent.continent').findMany({
+    populate: ['logo'],
+  });
+
+  for (const continent of continents) {
+    if (hasMedia(continent.logo)) continue;
+    if (!continent.id) continue;
+
+    const continentPath = path.join(
+      BASE_SHIELDS_DIR,
+      'continents',
+      `${normalizeKey(continent.name)}.png`
+    );
+
+    if (!fs.existsSync(continentPath)) continue;
+
+    await uploadToCloudinary(strapi, continentPath, continent.id, 'api::continent.continent', 'logo');
+    continentsUploaded++;
+    strapi.log.info(`[SEED] ✅ Continente atualizado com logo: ${continent.name}`);
+  }
+
+  const leagues = await (strapi as any).documents('api::league.league').findMany({
+    populate: ['logo'],
+  });
+
+  for (const league of leagues) {
+    if (!league.id) continue;
+
+    const normalizedLeagueName = normalizeKey(league.name);
+    const folderName = FOLDER_MAP[normalizedLeagueName] || normalizedLeagueName;
+    const leagueDir = path.join(BASE_SHIELDS_DIR, folderName);
+
+    if (!fs.existsSync(leagueDir)) continue;
+
+    if (!hasMedia(league.logo)) {
+      const leagueLogoPath = resolveLeagueLogoPath(leagueDir, league.name, folderName);
+
+      if (leagueLogoPath) {
+        await uploadToCloudinary(strapi, leagueLogoPath, league.id, 'api::league.league', 'logo');
+        leaguesUploaded++;
+        strapi.log.info(`[SEED] ✅ Liga atualizada com logo: ${league.name}`);
+      }
+    }
+
+    const clubs = await (strapi as any).documents('api::club.club').findMany({
+      filters: {
+        league: {
+          documentId: {
+            $eq: league.documentId,
+          },
+        },
+      },
+      populate: ['shield'],
+    });
+
+    const folderFiles = fs
+      .readdirSync(leagueDir)
+      .filter((fileName) => fileName.toLowerCase().endsWith('.png'));
+
+    for (const club of clubs) {
+      if (hasMedia(club.shield)) continue;
+      if (!club.id) continue;
+
+      const clubKey = normalizeKey(club.name);
+      const matchedFile = folderFiles.find((fileName) => {
+        const fileKey = normalizeKey(stripImageNameNoise(fileName));
+        return fileKey.includes(clubKey);
+      });
+
+      if (!matchedFile) continue;
+
+      await uploadToCloudinary(
+        strapi,
+        path.join(leagueDir, matchedFile),
+        club.id,
+        'api::club.club',
+        'shield'
+      );
+      clubsUploaded++;
+      strapi.log.info(`[SEED] ✅ Clube atualizado com escudo: ${club.name}`);
+    }
+  }
+
+  strapi.log.info(
+    `[SEED] ☁️ Uploads Cloudinary concluídos — continentes: ${continentsUploaded}, ligas: ${leaguesUploaded}, clubes: ${clubsUploaded}`
+  );
 };
 
 const attachMissingClubShields = async (strapi: any): Promise<void> => {
@@ -149,6 +299,7 @@ export default {
         strapi.log.info(
           `[SEED] ⏭️  Banco já possui ${existingCount} continente(s). Seed ignorado.`
         );
+        await attachMissingImages(strapi);
         await attachMissingClubShields(strapi);
         strapi.log.info(
           '[SEED]    Para recriar tudo: SEED_DATA=force npm run dev  ⚠️  apaga imagens!'
@@ -261,6 +412,7 @@ export default {
       }
     }
 
+    await attachMissingImages(strapi);
     await attachMissingClubShields(strapi);
 
     strapi.log.info(`[SEED] 🎉 Seed concluído! Total de clubes/seleções inseridos: ${totalClubes}`);
