@@ -4,20 +4,6 @@ const config: Core.Config.Middlewares = [
   'strapi::logger',
   'strapi::errors',
   {
-    name: 'strapi::security',
-    config: {
-      contentSecurityPolicy: {
-        useDefaults: true,
-        directives: {
-          'connect-src': ["'self'", 'https:'],
-          'img-src': ["'self'", 'data:', 'blob:', 'https://res.cloudinary.com', 'https://market-assets.strapi.io'],
-          'media-src': ["'self'", 'data:', 'blob:', 'https://res.cloudinary.com', 'https://market-assets.strapi.io'],
-          upgradeInsecureRequests: null,
-        },
-      },
-    },
-  },
-  {
     name: 'strapi::cors',
     config: {
       // Adicione aqui a URL do seu frontend em produção
@@ -33,6 +19,21 @@ const config: Core.Config.Middlewares = [
       keepHeaderOnError: true,
     },
   },
+  {
+    name: 'strapi::security',
+    config: {
+      contentSecurityPolicy: {
+        useDefaults: true,
+        directives: {
+          'connect-src': ["'self'", 'https:'],
+          'img-src': ["'self'", 'data:', 'blob:', 'https://res.cloudinary.com', 'https://market-assets.strapi.io'],
+          'media-src': ["'self'", 'data:', 'blob:', 'https://res.cloudinary.com', 'https://market-assets.strapi.io'],
+          upgradeInsecureRequests: null,
+        },
+      },
+    },
+  },
+  
   'strapi::poweredBy',
   'strapi::query',
   'strapi::body',
